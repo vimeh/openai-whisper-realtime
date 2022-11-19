@@ -22,17 +22,10 @@ SILENCE_THRESHOLD=400
 SILENCE_RATIO=200
 # number of samples in one buffer that are allowed to be higher than threshold
 
-
-global_speaker_ndarray = None
-global_mic_ndarray = None
+global_ndarrays = {} 
 model = whisper.load_model(MODEL_TYPE)
 
 pulse = pulsectl.Pulse('whisper-client')
-pulse_monitor_name = pulse.server_info().default_sink_name + '.monitor'
-pulse_monitor = [i for i in pulse.source_list() if i.name == pulse_monitor_name][-1]
-
-pulse_source_name = pulse.server_info().default_source_name
-pulse_source = [i for i in pulse.source_list() if i.name == pulse_source_name][-1]
 
 async def inputstream_generator(pulse_idx):
     """Generator that yields blocks of input data as NumPy arrays."""
@@ -50,9 +43,9 @@ async def inputstream_generator(pulse_idx):
             indata, status = await q_in.get()
             yield indata, status
             
-async def process_speaker_buffer():
-    global global_speaker_ndarray
-    async for indata, status in inputstream_generator(pulse_monitor.index):
+async def process_audio_buffer(pulse_idx):
+    global global_ndarrays 
+    async for indata, status in inputstream_generator(pulse_idx):
         
         indata_flattened = abs(indata.flatten())
                 
@@ -60,63 +53,44 @@ async def process_speaker_buffer():
         if(np.asarray(np.where(indata_flattened > SILENCE_THRESHOLD)).size < SILENCE_RATIO):
             continue
         
-        if (global_speaker_ndarray is not None):
-            global_speaker_ndarray = np.concatenate((global_speaker_ndarray, indata), dtype='int16')
+        if (global_ndarrays[pulse_idx] is not None):
+            global_ndarrays[pulse_idx] = np.concatenate((global_ndarrays[pulse_idx], indata), dtype='int16')
         else:
-            global_speaker_ndarray = indata
+            global_ndarrays[pulse_idx] = indata
             
         # concatenate buffers if the end of the current buffer is not silent
         if (np.average((indata_flattened[-100:-1])) > SILENCE_THRESHOLD/15):
             continue
         else:
-            local_ndarray = global_speaker_ndarray.copy()
-            global_speaker_ndarray = None
+            local_ndarray = global_ndarrays[pulse_idx].copy()
+            global_ndarrays[pulse_idx] = None
             indata_transformed = local_ndarray.flatten().astype(np.float32) / 32768.0
             result = model.transcribe(indata_transformed, language=LANGUAGE)
-            print("speaker" + result["text"])
+            print(f"{pulse_idx}: {result['text']}")
             
         del local_ndarray
         del indata_flattened
-
-async def process_mic_buffer():
-    global global_mic_ndarray
-    async for indata, status in inputstream_generator(pulse_source.index):
-        
-        indata_flattened = abs(indata.flatten())
-                
-        # discard buffers that contain mostly silence
-        if(np.asarray(np.where(indata_flattened > SILENCE_THRESHOLD)).size < SILENCE_RATIO):
-            continue
-        
-        if (global_mic_ndarray is not None):
-            global_mic_ndarray = np.concatenate((global_mic_ndarray, indata), dtype='int16')
-        else:
-            global_mic_ndarray = indata
-            
-        # concatenate buffers if the end of the current buffer is not silent
-        if (np.average((indata_flattened[-100:-1])) > SILENCE_THRESHOLD/15):
-            continue
-        else:
-            local_ndarray = global_mic_ndarray.copy()
-            global_mic_ndarray = None
-            indata_transformed = local_ndarray.flatten().astype(np.float32) / 32768.0
-            result = model.transcribe(indata_transformed, language=LANGUAGE)
-            print("mic:" + result["text"])
-            
-        del local_ndarray
-        del indata_flattened
-
 
 async def main():
     print('\nActivating wire ...\n')
-    speaker_task = asyncio.create_task(process_speaker_buffer())
-    mic_task = asyncio.create_task(process_mic_buffer())
+    pulse_monitor_name = pulse.server_info().default_sink_name + '.monitor'
+    pulse_monitor = [i for i in pulse.source_list() if i.name == pulse_monitor_name][-1]
+
+    pulse_source_name = pulse.server_info().default_source_name
+    pulse_source = [i for i in pulse.source_list() if i.name == pulse_source_name][-1]
+
+    pulse_idxs = [pulse_monitor.index, pulse_source.index]
+    tasks= []
+    for pulse_idx in pulse_idxs:
+        global_ndarrays[pulse_idx] = None
+        tasks.append(asyncio.create_task(process_audio_buffer(pulse_idx)))
     while True:
         await asyncio.sleep(1)
-    speaker_task.cancel()
-    mic_task.cancel()
+    for task in taskpool:
+        task.cancel()
     try:
-        await audio_task
+        for task in tasks:
+            await task
     except asyncio.CancelledError:
         print('\nwire was cancelled')
 
