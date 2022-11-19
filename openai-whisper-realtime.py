@@ -73,13 +73,13 @@ async def process_audio_buffer(pulse_idx):
 
 async def main():
     print('\nActivating wire ...\n')
-    pulse_monitor_name = pulse.server_info().default_sink_name + '.monitor'
-    pulse_monitor = [i for i in pulse.source_list() if i.name == pulse_monitor_name][-1]
+    pulse_speaker_name = pulse.server_info().default_sink_name + '.monitor'
+    pulse_speaker = pulse.get_source_by_name(pulse_speaker_name) 
 
-    pulse_source_name = pulse.server_info().default_source_name
-    pulse_source = [i for i in pulse.source_list() if i.name == pulse_source_name][-1]
+    pulse_microphone_name = pulse.server_info().default_source_name
+    pulse_microphone = pulse.get_source_by_name(pulse_microphone_name) 
 
-    pulse_idxs = [pulse_monitor.index, pulse_source.index]
+    pulse_idxs = [pulse_speaker.index, pulse_microphone.index]
     tasks= []
     for pulse_idx in pulse_idxs:
         global_ndarrays[pulse_idx] = None
