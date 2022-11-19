@@ -34,7 +34,7 @@ pulse_monitor = [i for i in pulse.source_list() if i.name == pulse_monitor_name]
 pulse_source_name = pulse.server_info().default_source_name
 pulse_source = [i for i in pulse.source_list() if i.name == pulse_source_name][-1]
 
-async def speakerstream_generator():
+async def inputstream_generator(pulse_idx):
     """Generator that yields blocks of input data as NumPy arrays."""
     q_in = asyncio.Queue()
     loop = asyncio.get_event_loop()
@@ -44,23 +44,7 @@ async def speakerstream_generator():
 
     stream = sd.InputStream(samplerate=16000, channels=1, dtype='int16', blocksize=BLOCKSIZE, callback=callback)
     pulse_output = [o for o in pulse.source_output_list() if o.name == 'ALSA Capture'][-1]
-    pulse.source_output_move(pulse_output.index, pulse_monitor.index)
-    with stream:
-        while True:
-            indata, status = await q_in.get()
-            yield indata, status
-            
-async def micstream_generator():
-    """Generator that yields blocks of input data as NumPy arrays."""
-    q_in = asyncio.Queue()
-    loop = asyncio.get_event_loop()
-
-    def callback(indata, frame_count, time_info, status):
-        loop.call_soon_threadsafe(q_in.put_nowait, (indata.copy(), status))
-
-    stream = sd.InputStream(samplerate=16000, channels=1, dtype='int16', blocksize=BLOCKSIZE, callback=callback)
-    pulse_output = [o for o in pulse.source_output_list() if o.name == 'ALSA Capture'][-1]
-    pulse.source_output_move(pulse_output.index, pulse_source.index)
+    pulse.source_output_move(pulse_output.index, pulse_idx)
     with stream:
         while True:
             indata, status = await q_in.get()
@@ -68,7 +52,7 @@ async def micstream_generator():
             
 async def process_speaker_buffer():
     global global_speaker_ndarray
-    async for indata, status in speakerstream_generator():
+    async for indata, status in inputstream_generator(pulse_monitor.index):
         
         indata_flattened = abs(indata.flatten())
                 
@@ -96,7 +80,7 @@ async def process_speaker_buffer():
 
 async def process_mic_buffer():
     global global_mic_ndarray
-    async for indata, status in micstream_generator():
+    async for indata, status in inputstream_generator(pulse_source.index):
         
         indata_flattened = abs(indata.flatten())
                 
