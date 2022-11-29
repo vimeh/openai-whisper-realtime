@@ -11,7 +11,7 @@ import pulsectl
 
 
 # SETTINGS
-MODEL_TYPE="small.en"
+MODEL_TYPE="medium.en"
 # the model used for transcription. https://github.com/openai/whisper#available-models-and-languages
 LANGUAGE="English"
 # pre-set the language to avoid autodetection
@@ -80,13 +80,13 @@ async def main():
     pulse_microphone = pulse.get_source_by_name(pulse_microphone_name) 
 
     pulse_idxs = [pulse_speaker.index, pulse_microphone.index]
-    tasks= []
+    tasks = []
     for pulse_idx in pulse_idxs:
         global_ndarrays[pulse_idx] = None
         tasks.append(asyncio.create_task(process_audio_buffer(pulse_idx)))
     while True:
         await asyncio.sleep(1)
-    for task in taskpool:
+    for task in tasks:
         task.cancel()
     try:
         for task in tasks:
